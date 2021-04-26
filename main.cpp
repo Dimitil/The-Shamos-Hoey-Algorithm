@@ -1,299 +1,291 @@
+//Shamos - Hoey Algorithm
+/*Aлгоритм поиска пересекающихся отрезков в полигоне с помощью заметающей прямой
+ (SweepLine), считается, что соседние и первый и последний отрезки не могут
+пересекаться, а имеют общую точку.
+структура TREE - содержит упорядоченые по xy указатели на отрезки, при таком
+порядке пересекаться могут только соседние в TREE отрезки, что и проверяется
+в intersect(). Проверку достаточно производить в точках начала и конца абсцис
+отрезков, эти точки реализованы структурой Event и храняться в упорядочено по xy в
+EventQueue. В функции simple_Polygon(const QPolygonF&) в основном цикле по EventQueue
+: если точка - точка начала отрезка, то она добавляется в TREE и проверяется
+со своими соседями на пересечение. Если эта точка - точка конца отрезка, то
+соответствующая ей точка начала отрезка удаляется из TREE.
+
+Algorithm of search of the intersect segments in the polygons by means of the
+sweeping line (SweepLine), is considered that the next both, and first and last
+segments cannot to be intersected, and have the common point.
+the structure of TREE - contains the pointers ordered on xy on segments, at it
+order only the next segments in TREE can be intersected, as it is checked
+in intersect (). Check is enough to be made in points of the beginning and end of
+abscissae segments, these points are realized by structure of Event and are stored in is ordered on xy in
+EventQueue. As simple_Polygon(const QPolygonF&) in a main loope on EventQueue
+: if a point - is a the beginning of a segment, then it is added to
+TREE and checked with the neighbors on crossing. If this point is end of a segment,
+then the point of the beginning of a segment corresponding to it is removed from TREE.
+*/
+
 #include <iostream>
-#include <list>
-#include <QPointF>
-#include <cmath>
-#include <vector>
+#include <algorithm>
 #include <set>
-#include <QDebug>
 #include <QPolygonF>
-#include <QtGlobal>
-#define FALSE   0
-#define TRUE    1
-#define LEFT    0
-#define RIGHT   1
-const double EPS = 0.000001;
+
+#define TREE std::multiset<SLseg*, SLseg_compare>
+
+#define LEFT_sxflib    0
+#define RIGHT_sxflib   1
+
+
+const double EPS_sxflib = 1E-9;
+
 // xyorder(): determines the xy lexicographical order of two points
 //      returns: (+1) if p1 > p2; (-1) if p1 < p2; and  0 if equal
 int xyorder( const QPointF* p1, const QPointF* p2 )
 {
-    // test the x-coord first
-    if (p1->x() - p2->x() > EPS) return 1;
-    if (p2->x() - p1->x() > EPS) return (-1);
-    // and test the y-coord second
-    if (p1->y() - p2->y() > EPS ) return 1;
-    if (p2->y() - p1->y() > EPS ) return (-1);
-    // when you exclude all other possibilities, what remains  is->->->
-    return 0;  // they are the same point
+    if (p1->x() - p2->x() > EPS_sxflib) return 1;
+    if (p2->x() - p1->x() > EPS_sxflib) return (-1);
+    if (p1->y() - p2->y() > EPS_sxflib ) return 1;
+    if (p2->y() - p1->y() > EPS_sxflib ) return (-1);
+    return 0;
 }
 
 // isLeft(): tests if point P2 is Left|On|Right of the line P0 to P1.
 //      returns: >0 for left, 0 for on, and <0 for  right of the line.
 inline double isLeft( QPointF P0, QPointF P1, QPointF P2 )
 {
-    return (P1.x() - P0.x())*(P2.y() - P0.y()) - (P2.x() - P0.x())*(P1.y() -  P0.y());
+    return (P1.x() - P0.x())*(P2.y() - P0.y()) -
+            (P2.x() - P0.x())*(P1.y() -  P0.y());
 }
 
 typedef struct _event Event;
 struct _event {
-    int      edge;          // polygon edge i is V[i] to V[i+1]
-    int      type;          // event type: LEFT or RIGHT vertex
-    QPointF*   eV;            // event vertex
+    int      edge;
+    int      type;          // event type: LEFT_sxflib or RIGHT_sxflib vertex
+    const QPointF*   eV;
 };
 
 int E_compare( const void* v1, const void* v2 ) // qsort compare two events
 {
     Event**    pe1 = (Event**)v1;
     Event**    pe2 = (Event**)v2;
-
     return xyorder( (*pe1)->eV, (*pe2)->eV );
 }
-// the EventQueue is a presorted array (no insertions needed)
+
 class EventQueue {
     int      ne;                // total number of events in array
     int      ix;                // index of next event on queue
-    Event*   Edata;             // array of all events
+    Event*  Edata;              // array of all events
     Event**  Eq;                // sorted list of event pointers
+    QPolygonF* P;
+
 public:
-              EventQueue(QPolygonF P);     // constructor
-             ~EventQueue(void)           // destructor
-                  { delete[] Eq; delete[] Edata;}
+    EventQueue(const QPolygonF& P)
+    {
+        ix = 0;
+        ne = (P.size() - 1) * 2;           // vertex events for each point
+        Edata = new Event[ne];
+        Eq =  new Event*[ne];
+        for (int i=0; i < ne; i++)           // init Eq array pointers
+        {
+            Eq[i] = &Edata[i];
+        }
 
-    Event*   next();                     // next event on queue
-};
-// EventQueue Routines
-EventQueue::EventQueue(QPolygonF P )
-{
-
-    ix = 0;
-    ne = 2 * (P.size()-1) ;           // vertex events for each point
-    Edata = new Event[ne];
-    Eq =  new Event*[ne];
-    for (int i=0; i < ne; i++)           // init Eq array pointers
-        Eq[i] = &Edata[i];
-
-    // Initialize event queue with edge segment endpoints
-    for (int i=0, j = 0; j < P.size() - 1; ) {        // init data for edge i
-           Eq[i]->eV   = &(P[j]);
-           i++;
-           j++;
-           Eq[i]->eV = &(P[j]);
-           i++;
+        // Initialize event queue with edge segment endpoints
+        for (int j = 0, i = 0; i < P.size() - 1; )
+        {
+            Eq[j]->eV = &(P[i]);
+            i++;
+            j++;
+            Eq[j]->eV = &(P[i]);
+            Eq[j-1]->edge = i - 1;
+            Eq[j]->edge   = i - 1;
+            if (xyorder( Eq[j-1]->eV, Eq[j]->eV) < 0)  {
+                Eq[j-1]->type = LEFT_sxflib;
+                Eq[j]->type   = RIGHT_sxflib;
+            }
+            else {
+                Eq[j - 1]->type = RIGHT_sxflib;
+                Eq[j]->type    = LEFT_sxflib;
+            }
+            j++;
+        }
+        qsort(Eq, ne, sizeof(Event**), E_compare);
     }
-    for ( int i = 0, j = 0; i < ne - 1; i +=2 ){
-           Eq[i]->edge = j;
-           Eq[i+1]->edge = j;
-           j++;
-           if (xyorder( Eq[i]->eV, Eq[i+1]->eV) < 0)  { // determine type
-               Eq[i]->type    = LEFT;
-                Eq[i+1]->type = RIGHT;
-           }
-           else {
-               Eq[i]->type    = RIGHT;
-                Eq[i+1]->type = LEFT;
-           }
-       }
-    // Sort Eq[] by increasing x and y
-    qsort(Eq, ne, sizeof(Event**), E_compare);
-}
-Event* EventQueue::next()
-{
-    if (ix >= ne)
-        return nullptr;
-    else
-        return Eq[ix++];
-}
 
+    ~EventQueue(void)           { delete[] Eq; delete[] Edata;}
+    const Event*   next()
+    {
+        if (ix >= ne)
+        {
+            return NULL;
+        }
+        else {
+            return Eq[ix++];
+        }
+    }
+};
 
-// SweepLine Class
-
-// SweepLine segment data struct
 typedef struct _SL_segment SLseg;
 struct _SL_segment {
-    int      edge;          // polygon edge i is V[i to V[i+1]
-    QPointF    lP;            // leftmost vertex pointi
-    QPointF    rP;            // rightmost vertex point
-    SLseg*   above;         // segment above this one
-    SLseg*   below;         // segment below this one
+    int      edge;          // number of edge
+    QPointF  lP;            // leftmost vertex pointi
+    QPointF  rP;            // rightmost vertex point
 };
 
-struct cmp{
-    bool operator()(SLseg* u, SLseg* d)
+
+//comparator for TREE
+struct SLseg_compare{
+    bool operator()(SLseg* up, SLseg* down)
     {
-        double uy1 = u->lP.y();
-        double uy2 = u->rP.y();
-        double dy1 = d->lP.y();
-        double dy2 = d->rP.y();
-        double minUY = std::min(uy1, uy2);
-        double minDU = std::min(dy1, dy2);
+        double minUY = std::min(up->lP.y(), up->rP.y());
+        double minDU = std::min(down->lP.y(), down->rP.y());
         return minUY > minDU;
     }
 };
-// the Sweep Line itself
-class SweepLine {
-    int      nv;            // number of vertices in polygon
-    QPolygonF* Pn;            // initial Polygon
-    std::multiset<SLseg*, cmp>     Tree;          // balanced binary tree
-public:
-              SweepLine(QPolygonF P)            // constructor
-                  { nv = P.size(); Pn = &P; }
-             ~SweepLine(void)                 // destructor
-                  { Tree.clear();}
 
-    SLseg*   add( Event* );
-    SLseg*   find( Event* );
-    int      intersect( SLseg*, SLseg*  );
-    void     remove( SLseg* );
+//comparator for find_if algoritm
+struct SLseg_equal_by_edge{
+    int val;
+    bool operator()(SLseg* seg)
+    {
+        return val==seg->edge;
+    }
 };
 
-SLseg* SweepLine::add( Event* E )
-{
-    // fill in SLseg element data
-    SLseg* s = new SLseg;
-    s->edge  = E->edge;
-
-    // if it is being added, then it must be a LEFT edge event
-    // but need to determine which endpoint is the left one
-    QPointF* v1 = &((*Pn)[s->edge]);
-    QPointF* v2 = &((*Pn)[s->edge+1]);
-    if (xyorder( v1, v2) < 0) { // determine which is leftmost
-        s->lP = *v1;
-        s->rP = *v2;
-    }
-    else {
-        s->rP = *v1;
-        s->lP = *v2;
-    }
-    s->above = (SLseg*)0;
-    s->below = (SLseg*)0;
-
-    // add a node to the balanced binary tree
-    auto nd = Tree.insert(s);
-    auto nx = nd;
-    nx++;
-    auto np = nd;
-    if (np == Tree.begin())
+class SweepLine {
+    int      nv;            // number of vertices in polygon
+    const QPolygonF* Pn;
+    TREE Tree;
+public:
+    SweepLine(const QPolygonF& P)   { nv = (P.size() - 1); Pn = &P; }
+    ~SweepLine()
     {
-        np = Tree.end();
+        for (TREE::iterator it = Tree.begin(); it != Tree.end(); ++it)
+        {
+            delete *it;
+        }
+        Tree.clear();
     }
-    else {
-    --np;
-    }
-    if (nx != Tree.end()) {
-        s->above = (SLseg*)(*nx);
-        s->above->below = s;
-    }
-    if (np != Tree.end()) {
-        s->below = (SLseg*)*np;
-        s->below->above = s;
-    }
-    return s;
-}
-#include<algorithm>
 
-SLseg* SweepLine::find( Event* E )
-{
-    // need a segment to find it in the tree
-    SLseg* s = new SLseg;
-    s->edge  = E->edge;
-    s->above = (SLseg*)0;
-    s->below = (SLseg*)0;
-
-    auto nd = std::find_if(Tree.begin(), Tree.end(), [&ed=s->edge](SLseg* seg){return ed==seg->edge;});
-    delete s;
-    if (nd == Tree.end())
-        return nullptr;
-
-    return *nd;
-}
-
-void SweepLine::remove( SLseg* s )
-{
-    // remove the node from the balanced binary tree
-    auto nd = Tree.find(s);
-    if (nd == Tree.end())
-        return;       // not there
-
-    // get the above and below segments pointing to each other
-    auto nx = nd;
-    ++nx;
-    if (nx != Tree.end()) {
-        SLseg* sx = (SLseg*)(*nx);
-        sx->below = s->below;
+    TREE::iterator   add(const Event* E)
+    {
+        SLseg* s = new SLseg;
+        s->edge  = E->edge;
+        const QPointF* v1 = &((*Pn)[s->edge]);
+        const QPointF* v2 = &((*Pn)[s->edge+1]);
+        if (xyorder( v1, v2) < 0)
+        {
+            s->lP = *v1;
+            s->rP = *v2;
+        }
+        else {
+            s->rP = *v1;
+            s->lP = *v2;
+        }
+        return Tree.insert(s);
     }
-    auto np = nd;
-    --np;
-    if (np != --Tree.begin()) {
-        SLseg* sp = (SLseg*)(*np);
-        sp->above = s->above;
+
+    TREE::iterator   find(const Event* E)
+    {
+        SLseg s;
+        s.edge = E->edge;
+        SLseg_equal_by_edge eqSl;
+        eqSl.val = s.edge;
+        TREE::iterator nd = std::find_if(Tree.begin(), Tree.end(), eqSl);
+        return nd;
     }
-    Tree.erase(nd);       // now  can safely remove it
-    delete s;
-}
+
+    bool intersect( TREE::iterator it1, TREE::iterator it2)
+    {
+        if(it1 == Tree.end() || it2 == Tree.end())
+        {
+            return false;
+        }
+        if(it1 == --Tree.begin() || it2 == --Tree.begin())
+        {
+            return false;
+        }
+        SLseg* s1 = *it1;
+        SLseg* s2 = *it2;
+        if (s1 == NULL || s2 == NULL)
+        {
+            return false;
+        }
+
+        int e1 = s1->edge;
+        int e2 = s2->edge;
+        if (((e1+1)%nv == e2) || (e1 == (e2+1)%nv))
+        {
+            return false;       // no non-simple intersect since consecutive
+        }
+
+        float lsign, rsign;
+        lsign = isLeft(s1->lP, s1->rP, s2->lP);    //  s2 left point sign
+        rsign = isLeft(s1->lP, s1->rP, s2->rP);    //  s2 right point sign
+        if (lsign * rsign > 0) // s2 endpoints have same sign  relative to s1
+            return false;       // => on same side => no intersect is possible
+        lsign = isLeft(s2->lP, s2->rP, s1->lP);    //  s1 left point sign
+        rsign = isLeft(s2->lP, s2->rP, s1->rP);    //  s1 right point sign
+        if (lsign * rsign > 0) // s1 endpoints have same sign  relative to s2
+            return false;       // => on same side => no intersect is possible
+        // the segments s1 and s2 straddle each other
+        return true;
+    }
+
+    void     remove( TREE::iterator nd)
+    {
+        delete *nd;
+        Tree.erase(nd);
+    }
+
+};
+
+
+
 
 // test intersect of 2 segments and return: 0=none, 1=intersect
-int SweepLine::intersect( SLseg* s1, SLseg* s2)
-{
-    if (s1 == (SLseg*)0 || s2 == (SLseg*)0)
-        return FALSE;       // no intersect if either segment doesn't exist
-
-    // check for consecutive edges in polygon
-    int e1 = s1->edge;
-    int e2 = s2->edge;
-    if (((e1+1)%nv == e2) || (e1 == (e2+1)%nv))
-        return FALSE;       // no non-simple intersect since consecutive
-    if(e1 == Pn->size() - 2)
-    {
-        return FALSE;
-    }
-
-    // test for existence of an intersect point
-    float lsign, rsign;
-    lsign = isLeft(s1->lP, s1->rP, s2->lP);    //  s2 left point sign
-    rsign = isLeft(s1->lP, s1->rP, s2->rP);    //  s2 right point sign
-    if (lsign * rsign > 0) // s2 endpoints have same sign  relative to s1
-        return FALSE;       // => on same side => no intersect is possible
-    lsign = isLeft(s2->lP, s2->rP, s1->lP);    //  s1 left point sign
-    rsign = isLeft(s2->lP, s2->rP, s1->rP);    //  s1 right point sign
-    if (lsign * rsign > 0) // s1 endpoints have same sign  relative to s2
-        return FALSE;       // => on same side => no intersect is possible
-    // the segments s1 and s2 straddle each other
-    return TRUE;            // => an intersect exists
-}
 //=============================================
-// simple_Polygon(): test if a Polygon is simple or not
+// simple_Polygon(): test if a Polygon is simple or not (simple polygon have not
+//                   self-intersect and other polygon inside)
 //     Input:  Pn = a polygon with n vertices V[]
 //     Return: FALSE(0) = is NOT simple
 //             TRUE(1)  = IS simple
-int
-simple_Polygon( QPolygonF Pn)
+bool simple_Polygon(const QPolygonF& Pn)
 {
     EventQueue  Eq(Pn);
     SweepLine   SL(Pn);
-    Event*      e;                  // the current event
-    SLseg*      s;                  // the current SL segment
+    const Event*      e;                  // the current event
+    TREE::iterator  s;                  // the current SL segment
 
     // This loop processes all events in the sorted queue
     // Events are only left or right vertices since
     // No new events will be added (an intersect => Done)
     e = Eq.next();
-    while ( e) {         // while there are events
-        if (e->type == LEFT) {      // process a left vertex
-            s = SL.add(e);          // add it to the sweep line
-            if (SL.intersect(  s, s->above)){
-                 return FALSE;      // Pn is NOT simple
+    while ( e) {
+        if (e->type == LEFT_sxflib) {
+            s = SL.add(e);
+            TREE::iterator above = s;
+            above--;
+            if (SL.intersect(  s, above)){
+                 return false;
             }
-            if (SL.intersect(  s, s->below))
-                 return FALSE;      // Pn is NOT simple
+            TREE::iterator below = s;
+            below++;
+            if (SL.intersect(  s, below))
+                 return false;
         }
-        else {                      // processs a right vertex
+        else {
             s = SL.find(e);
-            if (SL.intersect(  s->above, s->below))
-                 return FALSE;      // Pn is NOT simple
-            SL.remove(s);           // remove it from the sweep line
+            TREE::iterator above = s;
+            above--;
+            TREE::iterator below = s;
+            below++;
+            if (SL.intersect(  above, below))
+                 return false;
+            SL.remove(s);
         }
         e = Eq.next();
     }
-    return TRUE;      // Pn IS simple
+    return true;
 }
 int main()
 {
@@ -313,9 +305,23 @@ int main()
     polygon << *pp2;
 
     QPolygonF noSim;
-    noSim << QPointF(5, 5) << QPointF(0, 7.5) << QPointF(5, 10) << QPointF(10,7.5) << QPointF(20, 7.5) << QPointF(0,5) ;
+    noSim << QPointF(5, 5) << QPointF(0, 7.5) << QPointF(5, 10)
+          << QPointF(10,7.5) << QPointF(10, 5)  << QPointF(5,5);
 
-    qDebug() <<"Polygon is" <<  simple_Polygon(noSim);
-    qDebug() << "STOP";
+    QPolygonF p2;
+    p2 << QPointF(5256196.73, 22615493.58) << QPointF(5256208.02, 22615535.35)
+       << QPointF(5256231.33, 22615529.05) << QPointF(5256164.15, 22615375.26)
+       << QPointF(5256220.04, 22615535.28);// << QPointF(5256196.73, 22615493.58);
+
+    std::cout << "Polygon is ";
+    if (simple_Polygon(p2))
+    {
+        std::cout << "simple!" << std::endl;
+    }
+    else {
+        std::cout << "NOT simple!" << std::endl;
+    }
+
     return 0;
 }
+
